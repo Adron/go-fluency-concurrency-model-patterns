@@ -27,7 +27,7 @@ func RunFan() {
 	// Collect and display results
 	count := 0
 	for result := range finalResults {
-		fmt.Printf("Processed: %s\n", result)
+		fmt.Printf("Processed: Item %d -> %s (by Worker %d)\n", result.OriginalID, result.Processed, result.WorkerID)
 		count++
 	}
 
