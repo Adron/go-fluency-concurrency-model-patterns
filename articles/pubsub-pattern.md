@@ -16,6 +16,8 @@ The publish-subscribe implementation in `examples/pubsub.go` consists of three m
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunPubSub() {
     // Create a broadcaster
@@ -51,6 +53,46 @@ func RunPubSub() {
     wg.Wait()
 }
 ```
+
+**Step-by-step breakdown:**
+
+1. **Broadcaster Initialization**:
+   - `b := newBroadcaster()` creates a new broadcaster instance
+   - The broadcaster manages all subscriptions and message distribution
+   - This is the central hub that decouples publishers from subscribers
+
+2. **Subscriber Configuration**:
+   - `numSubscribers := 3` defines how many subscribers to create
+   - `var wg sync.WaitGroup` tracks when all subscribers finish processing
+   - This ensures the main function waits for all subscribers to complete
+
+3. **Subscriber Launch Loop**:
+   - Launches `numSubscribers` goroutines (3 in this case)
+   - `ch := b.subscribe()` creates a new subscription channel for each subscriber
+   - Each subscriber gets a unique ID (1, 2, 3) for tracking and debugging
+   - Uses closure `func(id int, ch <-chan string) { ... }(i, ch)` to capture the subscriber ID and channel
+
+4. **Subscriber Goroutine Implementation**:
+   - `defer wg.Done()` ensures the subscriber signals completion when it exits
+   - `for msg := range ch` continuously reads messages until the channel closes
+   - Each subscriber processes messages independently at its own pace
+   - Prints completion message when the channel closes
+
+5. **Publisher Goroutine Launch**:
+   - Runs in background to send messages asynchronously
+   - Publishes 5 messages with 400ms delays between them
+   - This simulates real-world message publishing with timing
+
+6. **Message Publishing Loop**:
+   - `for i := 1; i <= 5; i++` sends exactly 5 messages
+   - `msg := fmt.Sprintf("Message %d", i)` creates numbered messages
+   - `b.publish(msg)` broadcasts the message to all subscribers
+   - `time.Sleep(400 * time.Millisecond)` simulates message generation time
+
+7. **Graceful Shutdown**:
+   - `b.close()` closes the broadcaster and all subscriber channels
+   - This signals all subscribers to stop processing and exit
+   - `wg.Wait()` waits for all subscribers to finish before the main function exits
 
 ### Broadcaster Implementation
 
@@ -98,6 +140,59 @@ func (b *broadcaster) close() {
     b.closed = true
 }
 ```
+
+**Broadcaster function breakdown:**
+
+1. **Data Structure Design**:
+   - `subscribers []chan string`: Slice of channels, one per subscriber
+   - `closed bool`: Flag to prevent operations after shutdown
+   - `mu sync.Mutex`: Protects concurrent access to subscriber list
+   - Simple slice-based design is efficient for typical use cases
+
+2. **Constructor Function**:
+   - `newBroadcaster()` creates a new broadcaster instance
+   - Initializes empty subscriber slice with `make([]chan string, 0)`
+   - Returns pointer to broadcaster for method calls
+
+3. **Subscription Management**:
+   - `subscribe()` creates a new subscription channel for each subscriber
+   - `b.mu.Lock()` and `defer b.mu.Unlock()` ensure thread-safe subscriber list access
+   - `ch := make(chan string, 2)` creates a buffered channel with capacity 2
+   - Buffering prevents blocking if subscriber is temporarily slow
+   - `b.subscribers = append(b.subscribers, ch)` adds the new channel to the list
+   - Returns `<-chan string` (read-only) for encapsulation
+
+4. **Message Publishing Logic**:
+   - `publish(msg string)` broadcasts a message to all subscribers
+   - Thread-safe access with mutex protection
+   - `if b.closed { return }` prevents publishing after shutdown
+   - `for _, ch := range b.subscribers` iterates through all subscriber channels
+   - `ch <- msg` sends the message to each subscriber
+   - Non-blocking due to buffered channels
+
+5. **Graceful Shutdown Process**:
+   - `close()` coordinates shutdown of all subscribers
+   - Thread-safe access with mutex protection
+   - `if b.closed { return }` prevents double-closing
+   - `for _, ch := range b.subscribers { close(ch) }` closes all subscriber channels
+   - `b.closed = true` marks the broadcaster as closed
+   - Closing channels signals subscribers to stop processing
+
+**Key Design Patterns:**
+
+1. **Slice-based Subscriber Management**: Simple and efficient for typical pub/sub use cases, easy to add/remove subscribers.
+
+2. **Mutex Protection**: Ensures thread-safe access to the subscriber list during concurrent subscribe/publish operations.
+
+3. **Buffered Channels**: Each subscriber gets a buffered channel (capacity 2) to prevent blocking during message distribution.
+
+4. **Read-only Channel Returns**: `subscribe()` returns `<-chan string` to prevent subscribers from accidentally closing their channels.
+
+5. **Immediate Message Distribution**: Messages are sent to all subscribers immediately upon publishing, providing real-time delivery.
+
+6. **Graceful Shutdown**: Proper channel closing ensures all subscribers exit cleanly without goroutine leaks.
+
+7. **Closure Pattern**: `func(id int, ch <-chan string) { ... }(i, ch)` captures loop variables in each subscriber goroutine.
 
 ## How It Works
 

@@ -16,6 +16,8 @@ The timeouts and cancellation implementation in `examples/timeout_cancellation.g
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunTimeoutCancellation() {
     // Example 1: Context-based timeout
@@ -68,6 +70,59 @@ func RunTimeoutCancellation() {
 }
 ```
 
+**Step-by-step breakdown:**
+
+1. **Example 1: Context-based Timeout Setup**:
+   - `ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)` creates a context with a 2-second deadline
+   - `context.Background()` provides the root context
+   - `defer cancel()` ensures the context is cancelled when the function exits (cleanup)
+   - This demonstrates the standard Go pattern for timeout management
+
+2. **Context-based Task Execution**:
+   - `result := make(chan string, 1)` creates a buffered channel for the task result
+   - Buffering prevents goroutine leaks if the task completes after timeout
+   - `go longRunningTask(ctx, result)` launches the task with the timeout context
+   - The task receives the context and can check for cancellation
+
+3. **Context-based Result Handling**:
+   - Uses `select` statement to wait for either task completion or timeout
+   - `case res := <-result:` handles successful task completion
+   - `case <-ctx.Done():` handles timeout or cancellation
+   - `ctx.Err()` provides detailed error information about why the context was cancelled
+
+4. **Example 2: Channel-based Timeout Setup**:
+   - `ch := make(chan string, 1)` creates a buffered channel for the channel-based example
+   - This demonstrates an alternative approach without using context
+
+5. **Channel-based Task Execution**:
+   - Launches an anonymous goroutine that sleeps for 3 seconds
+   - `time.Sleep(3 * time.Second)` simulates a long-running task
+   - `ch <- "Channel task completed"` sends the result when complete
+   - This shows a simpler approach for basic timeout scenarios
+
+6. **Channel-based Result Handling**:
+   - Uses `select` to race between task completion and timeout
+   - `case res := <-ch:` handles successful completion
+   - `case <-time.After(1 * time.Second):` handles timeout after 1 second
+   - Note: task will timeout (1s) before completion (3s), demonstrating timeout behavior
+
+7. **Example 3: Context Cancellation Setup**:
+   - `ctx2, cancel2 := context.WithCancel(context.Background())` creates a cancellable context
+   - `defer cancel2()` ensures cleanup
+   - This demonstrates manual cancellation rather than timeout-based cancellation
+
+8. **Context Cancellation Trigger**:
+   - Launches a goroutine that waits 500ms then calls `cancel2()`
+   - `time.Sleep(500 * time.Millisecond)` simulates some condition that triggers cancellation
+   - `cancel2()` manually cancels the context
+   - This shows how external events can trigger cancellation
+
+9. **Context Cancellation Detection**:
+   - Uses `select` to wait for either timeout or cancellation
+   - `case <-time.After(2 * time.Second):` provides a fallback timeout
+   - `case <-ctx2.Done():` detects manual cancellation
+   - `ctx2.Err()` provides the cancellation reason
+
 ### Long-running Task Implementation
 
 ```go
@@ -90,6 +145,57 @@ func longRunningTask(ctx context.Context, result chan<- string) {
     }
 }
 ```
+
+**Long-running task breakdown:**
+
+1. **Function Signature**:
+   - `ctx context.Context`: Receives the timeout context from the caller
+   - `result chan<- string`: Write-only channel for sending the result
+   - Directional channel prevents the task from accidentally reading from the result channel
+
+2. **Work Simulation Setup**:
+   - `workTime := time.Duration(rand.Intn(3000)+1000) * time.Millisecond` creates variable work duration
+   - Random duration between 1000-4000ms simulates real-world processing variability
+   - This makes timeout behavior visible and demonstrates different scenarios
+
+3. **Work Execution with Cancellation Check**:
+   - Uses `select` statement to handle both work completion and cancellation
+   - `case <-time.After(workTime):` simulates the actual work taking time
+   - `case <-ctx.Done():` checks for context cancellation or timeout
+   - This ensures the task can be cancelled at any time
+
+4. **Random Failure Simulation**:
+   - `if rand.Float32() < 0.6` creates a 60% probability of simulated failure
+   - High failure rate demonstrates cancellation behavior effectively
+   - `return` exits without sending a result when failure occurs
+   - This simulates internal task failures
+
+5. **Successful Completion Path**:
+   - If no failure occurs, `result <- "Long task completed successfully"` sends the result
+   - Only sends result if the task actually completes successfully
+   - Buffered channel prevents blocking if the main function has already timed out
+
+6. **Cancellation Handling**:
+   - `case <-ctx.Done():` detects when the context is cancelled or times out
+   - `ctx.Err()` provides detailed error information (timeout, cancellation, etc.)
+   - `return` exits immediately when cancellation is detected
+   - This ensures the task stops work immediately when cancelled
+
+**Key Design Patterns:**
+
+1. **Context Propagation**: The context is passed down to the task, enabling cancellation from the caller.
+
+2. **Select Statement**: Both the main function and task use `select` to handle multiple events non-blockingly.
+
+3. **Buffered Result Channels**: Buffering prevents goroutine leaks when timeouts occur before task completion.
+
+4. **Defer Cleanup**: `defer cancel()` ensures context cleanup even if the function panics or returns early.
+
+5. **Error Information**: `ctx.Err()` provides rich error information about why cancellation occurred.
+
+6. **Immediate Cancellation**: Tasks check `ctx.Done()` and exit immediately when cancellation is detected.
+
+7. **Race Condition Handling**: The `select` statement naturally handles the race between completion and timeout/cancellation.
 
 ## How It Works
 
