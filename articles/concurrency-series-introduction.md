@@ -92,16 +92,12 @@ This series is for Go developers who want to:
 - **Improve their code** with proven patterns and best practices
 - **Prepare for system design interviews** where concurrency is often a key topic
 
-Whether you're a junior developer looking to level up or a senior developer wanting to refresh your knowledge, there's something here for you.
+Whether you're a junior developer looking to level up or a senior developer wanting to refresh your knowledge, there's something here for you.  All of this written in context of elaborating on the series around maintain fluency in Go (and other languages) in the face of agentic - AKA vibe - programming.
 
 ## Let's Get Started
 
-Ready to dive in? Let's start with the [Pipeline Pattern](/articles/pipeline-pattern.md) and work our way through each pattern. By the end of this series, you'll have a solid understanding of the concurrency patterns that power modern, scalable systems.
+Ready to dive in? Let's start with the [Pipeline Pattern](/articles/pipeline-pattern.md) and work our way through each pattern. By the end of this series, you'll have a solid understanding of the concurrency patterns that power modern, scalable systems. Maybe you'll conjure up another one to add? Repo is open sourced over [here](https://github.com/Adron/go-fluency-concurrency-model-patterns).
 
 Remember, concurrency is like learning to ride a bike – it might feel wobbly at first, but once you get it, you'll wonder how you ever lived without it.
 
-Happy coding!
-
----
-
-*Follow me on [Twitter](https://twitter.com/adron) for more Go content, or check out my [blog](https://adronhall.com) for additional programming insights.* 
+Happy thrashing coding!

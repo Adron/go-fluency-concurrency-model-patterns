@@ -1,3 +1,5 @@
+[![Go](https://github.com/Adron/go-fluency-concurrency-model-patterns/actions/workflows/go.yml/badge.svg)](https://github.com/Adron/go-fluency-concurrency-model-patterns/actions/workflows/go.yml)
+
 # Concurrency Model Patterns
 
 A Go project demonstrating common concurrency patterns and models using Go's goroutines and channels.
