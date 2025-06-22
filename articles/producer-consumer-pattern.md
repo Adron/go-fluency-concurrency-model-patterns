@@ -16,6 +16,8 @@ The producer-consumer implementation in `examples/producer_consumer.go` consists
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunProducerConsumer() {
     bufferSize := 5
@@ -61,6 +63,64 @@ func RunProducerConsumer() {
     consumerWg.Wait()
 }
 ```
+
+**Step-by-step breakdown:**
+
+1. **Configuration Setup**:
+   - `bufferSize := 5` defines the buffer capacity - can hold up to 5 items
+   - `numProducers := 2` launches 2 producer goroutines
+   - `numConsumers := 3` launches 3 consumer goroutines
+   - `numItems := 10` specifies how many items each producer will create
+   - These values create a scenario where producers generate more data than consumers can immediately process
+
+2. **Buffer and Synchronization Setup**:
+   - `buffer := make(chan int, bufferSize)` creates a buffered channel with capacity 5
+   - Buffering allows producers to continue working even when consumers are slow
+   - `var wg sync.WaitGroup` tracks when all producers complete
+   - `var consumerWg sync.WaitGroup` tracks when all consumers complete
+
+3. **Producer Launch Loop**:
+   - Launches `numProducers` goroutines (2 in this case)
+   - Each producer gets a unique ID (1, 2) for tracking
+   - Uses closure `func(id int) { ... }(p)` to capture the producer ID
+   - `wg.Add(1)` increments the producer wait group before each goroutine
+
+4. **Producer Goroutine Implementation**:
+   - `defer wg.Done()` ensures the producer signals completion when it exits
+   - `for i := 0; i < numItems; i++` loop creates exactly 10 items per producer
+   - `item := rand.Intn(100)` generates random data (0-99) to simulate real data
+   - `buffer <- item` sends the item to the shared buffer (may block if buffer is full)
+   - `time.Sleep(time.Duration(rand.Intn(200)+100) * time.Millisecond)` simulates variable production time (100-300ms)
+
+5. **Consumer Launch Loop**:
+   - Launches `numConsumers` goroutines (3 in this case)
+   - Each consumer gets a unique ID (1, 2, 3) for tracking
+   - Uses closure to capture the consumer ID
+   - `consumerWg.Add(1)` increments the consumer wait group before each goroutine
+
+6. **Consumer Goroutine Implementation**:
+   - `defer consumerWg.Done()` ensures the consumer signals completion when it exits
+   - `for item := range buffer` continuously reads from the buffer until it closes
+   - `time.Sleep(time.Duration(rand.Intn(300)+100) * time.Millisecond)` simulates variable processing time (100-400ms)
+   - Consumers compete for items from the shared buffer (automatic load balancing)
+
+7. **Graceful Shutdown Process**:
+   - `wg.Wait()` waits for all producers to finish generating their items
+   - `close(buffer)` signals to consumers that no more data is coming
+   - `consumerWg.Wait()` waits for all consumers to finish processing remaining items
+   - This ensures clean termination without goroutine leaks
+
+**Key Design Patterns:**
+
+1. **Closure Pattern**: `func(id int) { ... }(p)` captures the loop variable `p` in each goroutine's closure, ensuring each goroutine gets a unique ID.
+
+2. **Dual WaitGroup Strategy**: Separate wait groups for producers and consumers allow for coordinated shutdown - producers finish first, then buffer closes, then consumers finish.
+
+3. **Buffered Channel as Queue**: The buffer decouples production and consumption rates, allowing the system to handle temporary mismatches in speed.
+
+4. **Range Loop for Consumers**: `for item := range buffer` automatically exits when the buffer closes, providing natural termination.
+
+5. **Simulated Work**: Random delays make concurrency visible and demonstrate how the pattern handles varying processing speeds.
 
 ## How It Works
 

@@ -16,6 +16,8 @@ The worker pools implementation in `examples/pools.go` consists of three main co
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunPools() {
     // Configuration
@@ -60,6 +62,41 @@ func RunPools() {
 }
 ```
 
+**Step-by-step breakdown:**
+
+1. **Configuration Setup**:
+   - `numWorkers := 3` defines the fixed pool size - only 3 workers will ever be active
+   - `numJobs := 15` specifies how many jobs to process (more jobs than workers to demonstrate queuing)
+   - These values control the concurrency level and workload
+
+2. **Channel Creation**:
+   - `jobs := make(chan int, numJobs)` creates a buffered channel with capacity for all jobs
+   - Buffering prevents job submission from blocking when workers are busy
+   - `results := make(chan string, numJobs)` creates a buffered result channel
+   - Both channels are buffered to handle the full workload without blocking
+
+3. **Worker Pool Initialization**:
+   - `var wg sync.WaitGroup` tracks when all workers complete
+   - The loop launches exactly `numWorkers` goroutines
+   - Each worker gets a unique ID (1, 2, 3) for tracking and debugging
+   - All workers share the same `jobs` and `results` channels
+
+4. **Job Submission Goroutine**:
+   - Runs in background to send jobs asynchronously
+   - `defer close(jobs)` ensures the job channel closes after all jobs are sent
+   - The loop sends jobs one by one with a 100ms delay between submissions
+   - This simulates real-world job generation (e.g., incoming HTTP requests)
+
+5. **Cleanup Goroutine**:
+   - Waits for all workers to finish using `wg.Wait()`
+   - Closes the results channel when all workers are done
+   - Prevents deadlocks and signals that no more results are coming
+
+6. **Result Collection**:
+   - The main goroutine consumes results as they become available
+   - Results may arrive in any order (not necessarily job submission order)
+   - The loop exits when the results channel closes
+
 ### Worker Implementation
 
 ```go
@@ -82,6 +119,41 @@ func workerPool(id int, jobs <-chan int, results chan<- string, wg *sync.WaitGro
     fmt.Printf("Worker %d finished\n", id)
 }
 ```
+
+**Worker function breakdown:**
+
+1. **Function Signature**:
+   - `id int`: Unique worker identifier (1, 2, 3) for tracking and debugging
+   - `jobs <-chan int`: Read-only channel for receiving jobs
+   - `results chan<- string`: Write-only channel for sending results
+   - `wg *sync.WaitGroup`: For signaling when this worker completes
+
+2. **Resource Management**:
+   - `defer wg.Done()` ensures the worker signals completion even if it panics
+   - Automatic cleanup when the function exits
+   - Prevents goroutine leaks and ensures proper shutdown
+
+3. **Worker Lifecycle**:
+   - Prints startup message to track worker initialization
+   - Enters the main processing loop
+   - Prints completion message when the job channel closes
+
+4. **Job Processing Loop**:
+   - `for job := range jobs` continuously processes jobs until the channel closes
+   - Each worker competes for jobs from the shared channel (automatic load balancing)
+   - When the jobs channel closes, all workers naturally exit the loop
+
+5. **Simulated Work Processing**:
+   - `processingTime := time.Duration(rand.Intn(300)+200) * time.Millisecond` creates variable processing time
+   - Random delay between 200-500ms simulates real-world processing variance
+   - Makes concurrency visible - workers process at different speeds
+   - Demonstrates how the pool handles varying job complexity
+
+6. **Result Generation and Sending**:
+   - Creates a descriptive result string with job ID, worker ID, and processing time
+   - `results <- result` sends the result to the shared result channel
+   - Non-blocking because the result channel is buffered
+   - Results can be sent in any order (not necessarily job submission order)
 
 ## How It Works
 
