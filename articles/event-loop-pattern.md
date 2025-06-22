@@ -16,6 +16,8 @@ The event loop implementation in `examples/event_loop.go` consists of three main
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunEventLoop() {
     // Create event channels
@@ -38,6 +40,36 @@ func RunEventLoop() {
     fmt.Println("Event loop stopped.")
 }
 ```
+
+**Step-by-step breakdown:**
+
+1. **Event Channel Creation**:
+   - `userEvents := make(chan string, 10)` creates a buffered channel for user events
+   - `systemEvents := make(chan string, 10)` creates a buffered channel for system events
+   - `timerEvents := make(chan string, 10)` creates a buffered channel for timer events
+   - `stop := make(chan struct{})` creates a signal channel for graceful shutdown
+   - Buffer size of 10 prevents blocking when event sources generate events faster than processing
+
+2. **Event Source Launch**:
+   - `go userEventSource(userEvents)` launches the user event generator in background
+   - `go systemEventSource(systemEvents)` launches the system event generator in background
+   - `go timerEventSource(timerEvents)` launches the timer event generator in background
+   - Each event source runs independently and continuously generates events
+
+3. **Event Loop Launch**:
+   - `go eventLoop(userEvents, systemEvents, timerEvents, stop)` starts the central event loop
+   - The event loop runs in its own goroutine to process events from all sources
+   - This is the core coordinator that handles all events sequentially
+
+4. **Demonstration Period**:
+   - `time.Sleep(5 * time.Second)` lets the event loop run for 5 seconds
+   - This provides enough time to see the pattern in action
+   - During this time, all event sources are generating events and the loop is processing them
+
+5. **Graceful Shutdown**:
+   - `close(stop)` signals the event loop to stop processing
+   - The event loop will receive this signal and exit gracefully
+   - `fmt.Println("Event loop stopped.")` confirms the shutdown
 
 ### Event Loop Implementation
 
@@ -66,6 +98,48 @@ func eventLoop(userEvents, systemEvents, timerEvents <-chan string, stop <-chan 
     }
 }
 ```
+
+**Event loop breakdown:**
+
+1. **Function Signature**:
+   - Takes read-only channels (`<-chan string`) for each event type
+   - Takes a read-only stop channel (`<-chan struct{}`) for shutdown
+   - Directional channels provide encapsulation and prevent accidental misuse
+
+2. **Infinite Loop Structure**:
+   - `for { ... }` creates an infinite loop that continuously processes events
+   - The loop will run until explicitly stopped by the stop signal
+   - This ensures the event loop is always ready to handle events
+
+3. **Select Statement**:
+   - `select` statement waits for events from any of the four channels
+   - Non-blocking - if no events are available, it waits efficiently
+   - Fair selection - all event sources have equal priority
+   - Only one case executes at a time, ensuring sequential processing
+
+4. **User Event Handling**:
+   - `case event := <-userEvents:` handles user events (clicks, keypresses, etc.)
+   - `fmt.Printf("Event Loop: Processing user event: %s\n", event)` logs the event
+   - `processUserEvent(event)` calls the appropriate handler function
+   - User events typically need quick response for good UX
+
+5. **System Event Handling**:
+   - `case event := <-systemEvents:` handles system events (file changes, network status, etc.)
+   - `fmt.Printf("Event Loop: Processing system event: %s\n", event)` logs the event
+   - `processSystemEvent(event)` calls the system event handler
+   - System events may require more processing time
+
+6. **Timer Event Handling**:
+   - `case event := <-timerEvents:` handles timer events (periodic ticks)
+   - `fmt.Printf("Event Loop: Processing timer event: %s\n", event)` logs the event
+   - `processTimerEvent(event)` calls the timer event handler
+   - Timer events are typically lightweight and frequent
+
+7. **Stop Signal Handling**:
+   - `case <-stop:` handles the shutdown signal
+   - `fmt.Println("Event Loop: Received stop signal, shutting down...")` logs shutdown
+   - `return` exits the event loop gracefully
+   - This ensures clean termination without data loss
 
 ### Event Source Implementations
 
@@ -101,6 +175,28 @@ func timerEventSource(events chan<- string) {
 }
 ```
 
+**Event source breakdown:**
+
+1. **User Event Source**:
+   - `eventTypes := []string{...}` defines realistic user interaction events
+   - `for { ... }` creates an infinite loop for continuous event generation
+   - `event := eventTypes[rand.Intn(len(eventTypes))]` randomly selects an event type
+   - `events <- fmt.Sprintf("User %s", event)` sends the formatted event to the channel
+   - `time.Sleep(time.Duration(rand.Intn(1000)+500) * time.Millisecond)` simulates variable user interaction timing (500-1500ms)
+
+2. **System Event Source**:
+   - `eventTypes := []string{...}` defines realistic system monitoring events
+   - Similar structure to user events but with system-specific event types
+   - `time.Sleep(time.Duration(rand.Intn(1500)+1000) * time.Millisecond)` simulates slower system event generation (1000-2500ms)
+   - System events typically occur less frequently than user events
+
+3. **Timer Event Source**:
+   - `ticker := time.NewTicker(800 * time.Millisecond)` creates a ticker for regular events
+   - `defer ticker.Stop()` ensures the ticker is cleaned up when the function exits
+   - `for { select { case <-ticker.C: ... } }` waits for ticker events
+   - `events <- fmt.Sprintf("Timer tick at %v", time.Now().Format("15:04:05.000"))` sends timestamped timer events
+   - Timer events occur at regular 800ms intervals, providing predictable timing
+
 ### Event Processing Functions
 
 ```go
@@ -122,6 +218,39 @@ func processTimerEvent(event string) {
     fmt.Printf("  Processed timer event: %s\n", event)
 }
 ```
+
+**Event processing breakdown:**
+
+1. **User Event Processing**:
+   - `time.Sleep(50 * time.Millisecond)` simulates quick user event processing
+   - User events need fast response for good user experience
+   - `fmt.Printf("  Processed user event: %s\n", event)` confirms processing completion
+
+2. **System Event Processing**:
+   - `time.Sleep(100 * time.Millisecond)` simulates longer system event processing
+   - System events may require more complex processing (file I/O, network calls, etc.)
+   - `fmt.Printf("  Processed system event: %s\n", event)` confirms processing completion
+
+3. **Timer Event Processing**:
+   - `time.Sleep(30 * time.Millisecond)` simulates lightweight timer event processing
+   - Timer events are typically simple and fast to process
+   - `fmt.Printf("  Processed timer event: %s\n", event)` confirms processing completion
+
+**Key Design Patterns:**
+
+1. **Single-threaded Event Processing**: The event loop processes events sequentially in a single goroutine, preventing race conditions.
+
+2. **Channel-based Communication**: All event sources communicate with the event loop through channels, providing natural synchronization.
+
+3. **Select Statement**: The `select` statement provides non-blocking, fair event selection from multiple sources.
+
+4. **Buffered Channels**: Buffer size of 10 prevents event sources from blocking when the event loop is busy processing.
+
+5. **Graceful Shutdown**: The stop channel provides clean shutdown without data loss or resource leaks.
+
+6. **Structured Events**: Each event type has a clear structure and meaning, making the system easy to understand and extend.
+
+7. **Simulated Processing**: Random delays simulate real-world processing times and make the pattern's behavior visible.
 
 ## How It Works
 
