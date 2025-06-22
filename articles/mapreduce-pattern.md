@@ -16,6 +16,8 @@ The MapReduce implementation in `examples/mapreduce.go` consists of three main p
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunMapReduce() {
     // Sample data: words to count
@@ -49,6 +51,37 @@ func RunMapReduce() {
 }
 ```
 
+**Step-by-step breakdown:**
+
+1. **Input Data Preparation**:
+   - `data := []string{...}` creates a slice of text lines to process
+   - Each line contains multiple words that will be counted
+   - The data is designed to demonstrate word frequency (e.g., "hello" appears multiple times)
+   - This simulates a real-world scenario where you have text documents to analyze
+
+2. **Map Phase Execution**:
+   - `mapped := mapPhase(data)` processes the input data in parallel
+   - Returns a channel of `KeyValue` pairs where each word is paired with a count of 1
+   - This is the first phase of the MapReduce pattern - transforming raw data into key-value pairs
+   - The channel-based approach allows for streaming data between phases
+
+3. **Shuffle Phase Execution**:
+   - `grouped := shufflePhase(mapped)` groups the key-value pairs by key
+   - Takes the channel output from the map phase
+   - Groups all occurrences of the same word together
+   - Returns a map where keys are words and values are slices of counts
+
+4. **Reduce Phase Execution**:
+   - `result := reducePhase(grouped)` aggregates the grouped data
+   - Sums up all the counts for each word
+   - Produces the final word count results
+   - This is the final phase that produces the desired output
+
+5. **Result Display**:
+   - Iterates through the final results map
+   - Displays each word and its total count
+   - Shows the complete word frequency analysis
+
 ### Map Phase Implementation
 
 ```go
@@ -79,6 +112,43 @@ func mapPhase(data []string) <-chan KeyValue {
 }
 ```
 
+**Map phase breakdown:**
+
+1. **Channel Setup**:
+   - `out := make(chan KeyValue, len(data)*10)` creates a buffered channel for output
+   - Buffer size of `len(data)*10` accounts for multiple words per line
+   - Buffering prevents blocking when multiple goroutines emit simultaneously
+   - Returns a read-only channel (`<-chan KeyValue`) for encapsulation
+
+2. **Parallel Processing Setup**:
+   - `var wg sync.WaitGroup` tracks when all map goroutines complete
+   - Each line of text gets its own goroutine for parallel processing
+   - This enables true parallelism - all lines can be processed simultaneously
+
+3. **Goroutine Launch**:
+   - `for _, line := range data` iterates through each line of input
+   - `go func(text string) { ... }(line)` launches a goroutine for each line
+   - Uses closure to capture the current line in each goroutine
+   - `wg.Add(1)` increments the wait group before each goroutine
+
+4. **Word Processing**:
+   - `defer wg.Done()` ensures the goroutine signals completion when it exits
+   - `strings.Fields(strings.ToLower(text))` splits the line into words and converts to lowercase
+   - `strings.Fields()` splits on whitespace, handling multiple spaces correctly
+   - `strings.ToLower()` ensures consistent word matching (case-insensitive)
+
+5. **Key-Value Emission**:
+   - `for _, word := range words` processes each word in the line
+   - `time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)` simulates processing time
+   - `out <- KeyValue{Key: word, Value: 1}` emits a key-value pair for each word
+   - Each word gets a value of 1 (will be summed in reduce phase)
+
+6. **Channel Cleanup**:
+   - `go func() { wg.Wait(); close(out) }()` runs in background
+   - Waits for all map goroutines to complete
+   - Closes the output channel when all processing is done
+   - This signals to downstream phases that no more data is coming
+
 ### Shuffle Phase Implementation
 
 ```go
@@ -102,6 +172,40 @@ func shufflePhase(mapped <-chan KeyValue) map[string][]int {
     return grouped
 }
 ```
+
+**Shuffle phase breakdown:**
+
+1. **Data Structure Setup**:
+   - `grouped := make(map[string][]int)` creates the output map
+   - Keys are words (strings), values are slices of counts ([]int)
+   - This structure groups all occurrences of each word together
+   - `var mu sync.Mutex` provides thread safety for concurrent map access
+
+2. **WaitGroup Setup**:
+   - `var wg sync.WaitGroup` tracks when all shuffle goroutines complete
+   - Each key-value pair gets its own goroutine for parallel processing
+   - This maintains parallelism from the map phase
+
+3. **Channel Consumption**:
+   - `for kv := range mapped` consumes key-value pairs from the map phase
+   - The loop continues until the map phase closes the channel
+   - Each key-value pair is processed as it arrives
+
+4. **Parallel Grouping**:
+   - `go func(kv KeyValue) { ... }(kv)` launches a goroutine for each key-value pair
+   - Uses closure to capture the current key-value pair
+   - `wg.Add(1)` increments the wait group before each goroutine
+
+5. **Thread-Safe Grouping**:
+   - `defer wg.Done()` ensures proper cleanup
+   - `mu.Lock()` and `mu.Unlock()` protect the shared map during concurrent access
+   - `grouped[kv.Key] = append(grouped[kv.Key], kv.Value)` adds the value to the appropriate group
+   - This groups all values for the same key together
+
+6. **Completion and Return**:
+   - `wg.Wait()` waits for all shuffle goroutines to complete
+   - Returns the grouped map with all words and their associated counts
+   - The map is now ready for the reduce phase
 
 ### Reduce Phase Implementation
 
@@ -134,6 +238,61 @@ func reducePhase(grouped map[string][]int) map[string]int {
     return result
 }
 ```
+
+**Reduce phase breakdown:**
+
+1. **Result Structure Setup**:
+   - `result := make(map[string]int)` creates the final output map
+   - Keys are words (strings), values are total counts (int)
+   - This is the final result structure after aggregation
+   - `var mu sync.Mutex` provides thread safety for concurrent result writing
+
+2. **WaitGroup Setup**:
+   - `var wg sync.WaitGroup` tracks when all reduce goroutines complete
+   - Each word group gets its own goroutine for parallel processing
+   - This maintains parallelism for the final aggregation phase
+
+3. **Parallel Processing Setup**:
+   - `for word, counts := range grouped` iterates through each word and its counts
+   - Each word group is processed independently in parallel
+   - This allows multiple words to be aggregated simultaneously
+
+4. **Goroutine Launch**:
+   - `go func(word string, counts []int) { ... }(word, counts)` launches a goroutine for each word
+   - Uses closure to capture the current word and its counts
+   - `wg.Add(1)` increments the wait group before each goroutine
+
+5. **Aggregation Processing**:
+   - `defer wg.Done()` ensures proper cleanup
+   - `time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)` simulates processing time
+   - `total := 0` initializes the sum for this word
+   - `for _, count := range counts { total += count }` sums all counts for the word
+
+6. **Thread-Safe Result Storage**:
+   - `mu.Lock()` and `mu.Unlock()` protect the shared result map
+   - `result[word] = total` stores the final count for the word
+   - This ensures thread-safe writing to the final result map
+
+7. **Completion and Return**:
+   - `wg.Wait()` waits for all reduce goroutines to complete
+   - Returns the final result map with word counts
+   - This completes the MapReduce pattern
+
+**Key Design Patterns:**
+
+1. **Channel-based Data Flow**: Channels provide natural streaming between phases with automatic backpressure.
+
+2. **Goroutine-per-Item Processing**: Each data item gets its own goroutine for true parallelism.
+
+3. **Buffered Channels**: Appropriate buffering prevents blocking and improves performance.
+
+4. **Mutex Protection**: Thread-safe access to shared data structures during concurrent operations.
+
+5. **WaitGroup Coordination**: Proper synchronization ensures all goroutines complete before proceeding.
+
+6. **Closure Pattern**: `func(text string) { ... }(line)` captures loop variables in goroutines.
+
+7. **Structured Data Types**: `KeyValue` struct provides type safety and clarity.
 
 ## How It Works
 

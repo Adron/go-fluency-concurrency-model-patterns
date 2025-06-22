@@ -15,6 +15,8 @@ The rate limiting implementation in `examples/rate_limiting.go` demonstrates two
 
 ### Code Analysis
 
+Let's break down the main function and understand how each component works:
+
 ```go
 func RunRateLimiting() {
     // Example 1: Fixed rate limiting
@@ -54,6 +56,52 @@ func RunRateLimiting() {
 }
 ```
 
+**Step-by-step breakdown:**
+
+1. **Example 1: Fixed Rate Limiter Setup**:
+   - `limiter := newFixedRateLimiter(2, time.Second)` creates a limiter that allows 2 requests per second
+   - Rate of 2 requests per second means each request must wait 500ms between requests
+   - This demonstrates a simple, predictable rate limiting approach
+
+2. **Fixed Rate Limiter Request Launch**:
+   - Launches 6 concurrent goroutines to simulate multiple simultaneous requests
+   - `for i := 1; i <= 6; i++` creates requests numbered 1-6
+   - Uses closure `func(id int) { ... }(i)` to capture the request ID
+   - `wg.Add(1)` tracks each request goroutine
+
+3. **Fixed Rate Limiter Request Processing**:
+   - `defer wg.Done()` ensures the request signals completion when it exits
+   - `limiter.Wait()` blocks until the rate limiter allows the request to proceed
+   - All requests are synchronized to the same ticker, ensuring exactly 2 requests per second
+   - `time.Now().Format("15:04:05.000")` shows precise timing to demonstrate rate control
+
+4. **Fixed Rate Limiter Coordination**:
+   - `wg.Wait()` waits for all 6 requests to complete
+   - Requests will be processed in batches of 2 per second due to the rate limiting
+
+5. **Example 2: Token Bucket Limiter Setup**:
+   - `tokenLimiter := newTokenBucketLimiter(3, 5)` creates a token bucket with 3 tokens per second and burst capacity of 5
+   - Rate of 3 tokens per second means tokens are refilled every 333ms
+   - Burst capacity of 5 means up to 5 requests can be processed immediately
+
+6. **Token Bucket Limiter Request Launch**:
+   - Launches 10 concurrent goroutines to test burst handling
+   - `for i := 1; i <= 10; i++` creates requests numbered 1-10
+   - Uses closure to capture request ID
+   - `wg2.Add(1)` tracks each request goroutine
+
+7. **Token Bucket Limiter Request Processing**:
+   - `defer wg2.Done()` ensures proper cleanup
+   - `if tokenLimiter.Allow()` checks if a token is available without blocking
+   - If token available: request is granted and processed immediately
+   - If no token available: request is denied immediately (non-blocking)
+   - Shows precise timing to demonstrate burst handling vs rate limiting
+
+8. **Token Bucket Limiter Coordination**:
+   - `wg2.Wait()` waits for all 10 requests to complete
+   - First 5 requests will likely be granted immediately (burst capacity)
+   - Remaining requests will be granted as tokens are refilled (3 per second)
+
 ### Fixed Rate Limiter Implementation
 
 ```go
@@ -79,6 +127,31 @@ func (r *fixedRateLimiter) Stop() {
     close(r.stop)
 }
 ```
+
+**Fixed rate limiter breakdown:**
+
+1. **Data Structure Design**:
+   - `ticker *time.Ticker`: Go's built-in ticker that fires at regular intervals
+   - `stop chan struct{}`: Signal channel for graceful shutdown
+   - Simple structure with minimal memory footprint
+
+2. **Constructor Function**:
+   - `newFixedRateLimiter(rate int, interval time.Duration)` takes rate and interval parameters
+   - `interval / time.Duration(rate)` calculates the tick interval
+   - Example: 1 second / 2 requests = 500ms between requests
+   - `time.NewTicker()` creates a ticker that fires every 500ms
+
+3. **Wait Method**:
+   - `Wait()` blocks until the next tick occurs
+   - `<-r.ticker.C` waits for the next tick from the ticker
+   - All requests calling `Wait()` are synchronized to the same ticker
+   - Ensures exactly the specified rate of operations
+
+4. **Stop Method**:
+   - `Stop()` provides cleanup functionality
+   - `r.ticker.Stop()` stops the ticker and frees resources
+   - `close(r.stop)` signals any waiting goroutines to stop
+   - Prevents resource leaks
 
 ### Token Bucket Limiter Implementation
 
@@ -137,6 +210,65 @@ func (t *tokenBucketLimiter) Wait() {
     <-t.tokens
 }
 ```
+
+**Token bucket limiter breakdown:**
+
+1. **Data Structure Design**:
+   - `tokens chan struct{}`: Channel-based bucket storing tokens
+   - `rate time.Duration`: Time interval between token refills
+   - `burst int`: Maximum number of tokens (burst capacity)
+   - `mu sync.Mutex`: Protects concurrent access (though not used in this implementation)
+   - `lastRefill time.Time`: Tracks last refill time (though not used in this implementation)
+
+2. **Constructor Function**:
+   - `newTokenBucketLimiter(rate int, burst int)` creates a token bucket limiter
+   - `make(chan struct{}, burst)` creates a buffered channel with burst capacity
+   - `time.Second / time.Duration(rate)` calculates refill interval
+   - Example: 1 second / 3 tokens = 333ms between refills
+
+3. **Initial Token Filling**:
+   - `for i := 0; i < burst; i++` fills the bucket with initial tokens
+   - `limiter.tokens <- struct{}{}` adds tokens to the channel
+   - Bucket starts full, allowing immediate burst of requests
+
+4. **Background Refilling**:
+   - `go limiter.refill()` starts background token refilling
+   - Runs independently of request processing
+   - Ensures continuous token availability
+
+5. **Refill Method**:
+   - `refill()` runs in background goroutine
+   - `time.NewTicker(t.rate)` creates ticker for regular refills
+   - `for range ticker.C` continuously refills tokens
+   - `select` with `default` prevents blocking if bucket is full
+
+6. **Allow Method (Non-blocking)**:
+   - `Allow()` checks if token is available without blocking
+   - `select` with `default` provides non-blocking token consumption
+   - Returns `true` if token available, `false` if bucket empty
+   - Immediate response for rate limit checking
+
+7. **Wait Method (Blocking)**:
+   - `Wait()` blocks until a token becomes available
+   - `<-t.tokens` waits for token from the channel
+   - FIFO order ensures fair token distribution
+   - Used when blocking behavior is desired
+
+**Key Design Patterns:**
+
+1. **Channel-based Token Storage**: Uses buffered channels for thread-safe token management with FIFO order.
+
+2. **Background Refilling**: Continuous token refilling in background goroutine ensures steady token availability.
+
+3. **Non-blocking Token Check**: `Allow()` method provides immediate response without blocking.
+
+4. **Ticker-based Rate Control**: Both limiters use `time.Ticker` for precise timing control.
+
+5. **Closure Pattern**: `func(id int) { ... }(i)` captures loop variables in request goroutines.
+
+6. **WaitGroup Coordination**: Proper coordination ensures all requests complete before program exits.
+
+7. **Resource Cleanup**: Both limiters provide cleanup methods to prevent resource leaks.
 
 ## How It Works
 
