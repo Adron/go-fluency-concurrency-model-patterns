@@ -120,7 +120,7 @@ func generateNumbers(count int) <-chan int {
    - Without this delay, the pipeline would run too fast to observe
    - The delay also demonstrates how stages can work at different speeds
 
-### Pipeline Flow Visualization
+### Pipeline Flow
 
 Let's trace through a single number's journey through the pipeline:
 
