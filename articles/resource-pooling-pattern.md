@@ -15,8 +15,6 @@ The resource pooling implementation in `examples/resource_pooling.go` demonstrat
 
 ### Code Analysis
 
-Let's break down the main function and understand how each component works:
-
 ```go
 func RunResourcePooling() {
     // Example 1: Database connection pool
@@ -57,53 +55,6 @@ func RunResourcePooling() {
     wg.Wait()
 }
 ```
-
-**Step-by-step breakdown:**
-
-1. **Database Connection Pool Setup**:
-   - `dbPool := newDBConnectionPool(3, 5*time.Second)` creates a pool with 3 connections and 5-second timeout
-   - Pool size of 3 means only 3 workers can use connections simultaneously
-   - 5-second timeout prevents workers from waiting indefinitely for connections
-   - `defer dbPool.Close()` ensures proper cleanup when the function exits
-
-2. **Database Pool Worker Launch**:
-   - `var wg sync.WaitGroup` tracks when all database workers complete
-   - `for i := 1; i <= 5; i++` launches 5 workers (more than pool size to demonstrate pooling)
-   - Uses closure `func(id int) { ... }(i)` to capture the worker ID
-   - `wg.Add(1)` increments the wait group before each worker
-
-3. **Database Pool Worker Implementation**:
-   - `defer wg.Done()` ensures the worker signals completion when it exits
-   - `conn := dbPool.Get()` acquires a connection from the pool (may block if none available)
-   - `defer dbPool.Put(conn)` ensures the connection is returned to the pool
-   - `time.Sleep(time.Duration(rand.Intn(1000)+500) * time.Millisecond)` simulates database work (500-1500ms)
-
-4. **Database Pool Coordination**:
-   - `wg.Wait()` waits for all database workers to complete
-   - Only 3 workers can use connections simultaneously due to pool size
-   - Other workers will wait for connections to become available
-
-5. **HTTP Client Pool Setup**:
-   - `clientPool := newHTTPClientPool(2, 3*time.Second)` creates a pool with 2 clients and 3-second timeout
-   - Smaller pool size (2) demonstrates different resource constraints
-   - Shorter timeout (3 seconds) shows different timeout requirements
-   - `defer clientPool.Close()` ensures proper cleanup
-
-6. **HTTP Client Pool Worker Launch**:
-   - `for i := 1; i <= 4; i++` launches 4 workers (more than pool size)
-   - Similar structure to database workers but with different resource type
-   - `wg.Add(1)` tracks each HTTP client worker
-
-7. **HTTP Client Pool Worker Implementation**:
-   - `defer wg.Done()` ensures proper cleanup
-   - `client := clientPool.Get()` acquires an HTTP client from the pool
-   - `defer clientPool.Put(client)` ensures the client is returned to the pool
-   - `time.Sleep(time.Duration(rand.Intn(800)+300) * time.Millisecond)` simulates HTTP work (300-1100ms)
-
-8. **HTTP Client Pool Coordination**:
-   - `wg.Wait()` waits for all HTTP client workers to complete
-   - Only 2 workers can use clients simultaneously due to pool size
-   - Demonstrates how pooling handles resource constraints
 
 ### Database Connection Pool Implementation
 
@@ -188,60 +139,6 @@ func (p *DBConnectionPool) Close() {
 }
 ```
 
-**Database connection pool breakdown:**
-
-1. **Connection Structure Design**:
-   - `DBConnection struct` represents a database connection
-   - `ID string` provides unique identification for tracking and debugging
-   - `CreatedAt time.Time` tracks when the connection was created
-   - `LastUsed time.Time` tracks when the connection was last used for health checking
-
-2. **Pool Structure Design**:
-   - `DBConnectionPool struct` manages the connection pool
-   - `connections chan *DBConnection` uses a buffered channel for thread-safe resource management
-   - `maxSize int` defines the maximum number of connections in the pool
-   - `timeout time.Duration` defines the timeout for connection acquisition
-   - `closed bool` tracks pool state for graceful shutdown
-   - `mu sync.Mutex` protects pool state during concurrent operations
-
-3. **Pool Constructor**:
-   - `newDBConnectionPool(maxSize int, timeout time.Duration)` creates a new pool
-   - `connections: make(chan *DBConnection, maxSize)` creates a buffered channel with pool size
-   - The channel buffer size matches the pool size for optimal performance
-
-4. **Pool Pre-population**:
-   - `for i := 0; i < maxSize; i++` creates the initial set of connections
-   - `conn := &DBConnection{...}` creates each connection with unique ID and timestamps
-   - `pool.connections <- conn` adds each connection to the pool
-   - Pre-population ensures connections are immediately available
-
-5. **Connection Acquisition (Get Method)**:
-   - `select` statement handles both connection acquisition and timeout
-   - `case conn := <-p.connections:` acquires a connection from the pool
-   - `conn.LastUsed = time.Now()` updates the last used timestamp
-   - `case <-time.After(p.timeout):` handles timeout when no connections are available
-   - Returns `nil` on timeout to indicate failure
-
-6. **Connection Return (Put Method)**:
-   - `if conn == nil { return }` handles nil connections gracefully
-   - `p.mu.Lock()` and `defer p.mu.Unlock()` protect pool state during return
-   - `if p.closed { return }` prevents returning connections to a closed pool
-
-7. **Health Checking**:
-   - `if time.Since(conn.LastUsed) > p.timeout` checks if connection is stale
-   - Stale connections are discarded rather than returned to the pool
-   - This ensures only healthy connections are reused
-
-8. **Connection Return Logic**:
-   - `select { case p.connections <- conn: ... default: ... }` attempts to return connection
-   - If pool is full, connection is discarded (default case)
-   - This prevents pool overflow and memory leaks
-
-9. **Pool Cleanup (Close Method)**:
-   - `p.mu.Lock()` and `defer p.mu.Unlock()` protect pool state during shutdown
-   - `p.closed = true` marks the pool as closed
-   - `close(p.connections)` closes the channel to signal shutdown
-
 ### HTTP Client Pool Implementation
 
 ```go
@@ -324,50 +221,6 @@ func (p *HTTPClientPool) Close() {
     close(p.clients)
 }
 ```
-
-**HTTP client pool breakdown:**
-
-1. **Client Structure Design**:
-   - `HTTPClient struct` represents an HTTP client
-   - Similar structure to database connections for consistency
-   - `ID string` provides unique identification
-   - `CreatedAt` and `LastUsed` timestamps for lifecycle tracking
-
-2. **Pool Structure Design**:
-   - `HTTPClientPool struct` manages the HTTP client pool
-   - Identical structure to database pool for consistency
-   - Uses the same channel-based approach for resource management
-
-3. **Pool Constructor and Pre-population**:
-   - `newHTTPClientPool(maxSize int, timeout time.Duration)` creates the pool
-   - Pre-populates with `maxSize` HTTP clients
-   - Each client gets a unique ID and initial timestamps
-
-4. **Client Acquisition and Return**:
-   - `Get()` method identical to database pool with timeout handling
-   - `Put()` method includes health checking and graceful handling
-   - Same mutex protection and closed pool handling
-
-5. **Health Checking and Cleanup**:
-   - Same health checking logic as database pool
-   - Stale clients are discarded to maintain pool health
-   - `Close()` method provides graceful shutdown
-
-**Key Design Patterns:**
-
-1. **Channel-based Resource Management**: Uses buffered channels for thread-safe resource allocation and return.
-
-2. **Pre-populated Pools**: Creates all resources upfront for immediate availability and predictable performance.
-
-3. **Health Checking**: Validates resource health before reuse to ensure reliability.
-
-4. **Timeout Handling**: Prevents indefinite waiting with configurable timeouts.
-
-5. **Graceful Shutdown**: Proper cleanup prevents resource leaks during shutdown.
-
-6. **Mutex Protection**: Thread-safe state management for pool operations.
-
-7. **Resource Tracking**: Comprehensive tracking of resource lifecycle for monitoring and debugging.
 
 ## How It Works
 
